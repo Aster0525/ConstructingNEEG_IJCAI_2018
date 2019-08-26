@@ -14,7 +14,7 @@ Then, run the following scripts to construct the dataset for training our event 
 
 You can download the preprocessed dataset [here](https://drive.google.com/open?id=1sxqUtaBqatejx5iNdBjBa_T-YtOICD0A) and the converted embeddings [here](https://drive.google.com/open?id=1fDJAs9auB8sFd9CBEhA8uRIK_ZQMO1Dy).
 
-Pretrain the event representation model on the constructed dataset with the converted embeddings. (See [this repository](https://github.com/MagiaSN/commonsense_event_repr_emnlp19))
+Pretrain the event representation model on the constructed dataset with the converted embeddings. (See [this repository](https://github.com/MagiaSN/CommonsenseERL_EMNLP_2019))
 
 Finally, run `code/main_with_args.py` to load the pretraiend event representation model and train the SGNN model.
 
