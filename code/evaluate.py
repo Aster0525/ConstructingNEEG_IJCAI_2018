@@ -18,6 +18,9 @@ from event_chain import EventChain
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
+import argparse
+
+
 def get_event_chains(event_list):
     return ['%s_%s' % (ev[0],ev[2]) for ev in event_list]
 
@@ -127,38 +130,25 @@ def get_acc(scores,correct_answers,name='scores',save=False):
     return accuracy
 
 if __name__ == '__main__':
-    test_index=pickle.load(open('../data/test_index.pickle','rb'))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--test_index', type=str, default='../data/test_index.pickle')
+    parser.add_argument('--test_data', type=str, default='../data/corpus_index_test_with_args_all_chain.data')
+    parser.add_argument('--vocab_file', type=str, default='../data/encoding_with_args.csv')
+    parser.add_argument('--emb_file', type=str, default='../data/deepwalk_128_unweighted_with_args.txt')
+    parser.add_argument('--model_file', type=str, default='../models/backup_53.93.model')
+    parser.add_argument('--event_repr', type=str, default='ntn')
+    parser.add_argument('--pad_idx', type=int, default=0)
+    parser.add_argument('--hidden_dim', type=int, default=512)
+    parser.add_argument('--batch_size', type=int, default=2000)
+    parser.add_argument('--scores_file', type=str, default='../output/scores.csv')
+    option = parser.parse_args()
 
-    HIDDEN_DIM = 128
-    L2_penalty=0.00001
-    MARGIN=0.015
-    LR=0.0001
-    T=1
-    BATCH_SIZE=50
-    EPOCHES=520
-    PATIENTS=300
-    test_data=Data_data(pickle.load(open('../data/corpus_index_test_with_args_all_chain.data','rb')))
-    word_id,id_vec,word_vec=get_hash_for_word('/users3/zyli/github/OpenNE/output/verb_net/1_property/deepwalk_128_unweighted_with_args.txt',verb_net3_mapping_with_args)
-    
-    HIDDEN_DIM = 128*4
-    L2_penalty=0.00001
-    MARGIN=0.015
-    LR=0.0001
-    T=1
-    BATCH_SIZE=1000
-    EPOCHES=520
-    PATIENTS=300
-    test_data=Data_data(pickle.load(open('../data/corpus_index_test_with_args_all_chain.data','rb')))
-    model=trans_to_cuda(EventGraph_With_Args(len(word_vec),HIDDEN_DIM,word_vec,L2_penalty,MARGIN,LR,T))
-    model.load_state_dict(torch.load('../data/gnn_euclid_acc_52.380001068115234_.model'))
+    assert option.event_repr in ['cat', 'ntn', 'role_factor']
 
-    data=test_data.all_data()
-    correct_answers=data[2].cpu().data.numpy()
-    scores1=model(data[1],data[0]).cpu().data.numpy() 
-    scores1=process_test(scores1,test_index)
-    print (get_acc(scores1,correct_answers,'scores1'))
+    test_index=pickle.load(open(option.test_index,'rb'))
+    test_data=Data_data(pickle.load(open(option.test_data,'rb')))
+    word_id,id_vec,word_vec=get_hash_for_word(option.emb_file, option.vocab_file, option.pad_idx)
 
-    HIDDEN_DIM = 128*4
     L2_penalty=0.00001
     MARGIN=0.015
     LR=0.0001
@@ -166,69 +156,110 @@ if __name__ == '__main__':
     BATCH_SIZE=1000
     EPOCHES=520
     PATIENTS=300
-    test_data=Data_data(pickle.load(open('../data/corpus_index_test_with_args_all.data','rb')))
-    data=test_data.all_data()
-    model=trans_to_cuda(EventChain(embedding_dim=HIDDEN_DIM,hidden_dim=HIDDEN_DIM,vocab_size=len(word_vec),word_vec=word_vec,num_layers=1,bidirectional=False))
-    model.load_state_dict(torch.load('../data/event_chain_acc_50.98999786376953_.model'))
-    accuracy,accuracy1,accuracy2,accuracy3,accuracy4,scores2=model.predict_with_minibatch(data[1],data[2])
-    scores2=scores2.cpu().data.numpy() 
-    scores2=process_test(scores2,test_index)
-    print (get_acc(scores2,correct_answers,'scores2'))
 
-    scores3=pickle.load(open('../data/event_comp_test.scores','rb'),encoding='bytes')
-    scores3=process_test(scores3,test_index)
-    print (get_acc(scores3,correct_answers,'scores3'))
+    model=trans_to_cuda(EventGraph_With_Args(len(word_vec), option.hidden_dim ,word_vec,L2_penalty,MARGIN,LR,T, event_repr=option.event_repr))
+    model.load_state_dict(torch.load(option.model_file))
+
+    num_instances = test_data.A.size(0)
+    assert num_instances % option.batch_size == 0
+    acc = 0
+    scores_list = []
+    for i in range(int(num_instances / option.batch_size)):
+        data, _ = test_data.next_batch(option.batch_size)
+
+        test_index_slice = []
+        offset = i * option.batch_size
+        for index in test_index:
+            if offset <= index[0] < offset + option.batch_size:
+                test_index_slice.append((index[0] - offset, index[1]))
+
+        correct_answers=data[2].cpu().data.numpy()
+        scores1 = model(data[1], data[0])
+        scores1 = F.softmax(scores1, dim=1)
+        scores1=scores1.cpu().data.numpy()
+        scores_list.append(scores1)
+        scores1=process_test(scores1,test_index_slice)
+
+        acc += get_acc(scores1, correct_answers, 'scores1') / (num_instances / option.batch_size)
+    print(acc)
+
+    if option.scores_file != '':
+        with open(option.scores_file, 'w') as f:
+            for scores in scores_list:
+                for i in range(len(scores)):
+                    f.write(' '.join([str(scores[i][0]), str(scores[i][1]), str(scores[i][2]), str(scores[i][3]), str(scores[i][4])]) + '\n')
+
+    # HIDDEN_DIM = 128*4
+    # L2_penalty=0.00001
+    # MARGIN=0.015
+    # LR=0.0001
+    # T=1
+    # BATCH_SIZE=1000
+    # EPOCHES=520
+    # PATIENTS=300
+    # test_data=Data_data(pickle.load(open('../data/corpus_index_test_with_args_all.data','rb')))
+    # data=test_data.all_data()
+    # model=trans_to_cuda(EventChain(embedding_dim=HIDDEN_DIM,hidden_dim=HIDDEN_DIM,vocab_size=len(word_vec),word_vec=word_vec,num_layers=1,bidirectional=False))
+    # model.load_state_dict(torch.load('../data/event_chain_acc_50.98999786376953_.model'))
+    # accuracy,accuracy1,accuracy2,accuracy3,accuracy4,scores2=model.predict_with_minibatch(data[1],data[2])
+    # scores2=scores2.cpu().data.numpy() 
+    # scores2=process_test(scores2,test_index)
+    # print (get_acc(scores2,correct_answers,'scores2'))
+
+    # scores3=pickle.load(open('../data/event_comp_test.scores','rb'),encoding='bytes')
+    # scores3=process_test(scores3,test_index)
+    # print (get_acc(scores3,correct_answers,'scores3'))
 
 
-    scores1=preprocessing.scale(scores1)
-    scores2=preprocessing.scale(scores2)
-    scores3=preprocessing.scale(scores3)
+    # scores1=preprocessing.scale(scores1)
+    # scores2=preprocessing.scale(scores2)
+    # scores3=preprocessing.scale(scores3)
 
-    best_acc=0. 
-    best_i_j_k=(0,0)
-    for i in np.arange(-3,3,0.1):
-        for j in np.arange(-3,3,0.1):
-            acc=get_acc(scores3*i+scores1*j,correct_answers)
-            if best_acc<acc:
-                best_acc=acc 
-                best_i_j_k=(i,j)
-    print (best_acc,best_i_j_k)
-    get_acc(scores3*best_i_j_k[0]+scores1*best_i_j_k[1],correct_answers,'scores1_scores3')
+    # best_acc=0. 
+    # best_i_j_k=(0,0)
+    # for i in np.arange(-3,3,0.1):
+    #     for j in np.arange(-3,3,0.1):
+    #         acc=get_acc(scores3*i+scores1*j,correct_answers)
+    #         if best_acc<acc:
+    #             best_acc=acc 
+    #             best_i_j_k=(i,j)
+    # print (best_acc,best_i_j_k)
+    # get_acc(scores3*best_i_j_k[0]+scores1*best_i_j_k[1],correct_answers,'scores1_scores3')
 
-    best_acc=0. 
-    best_i_j_k=(0,0)
-    for i in np.arange(-3,3,0.1):
-        for j in np.arange(-3,3,0.1):
-            acc=get_acc(scores1*i+scores2*j,correct_answers)
-            if best_acc<acc:
-                best_acc=acc 
-                best_i_j_k=(i,j)
-    print (best_acc,best_i_j_k)
-    get_acc(scores1*best_i_j_k[0]+scores2*best_i_j_k[1],correct_answers,'scores1_scores2')
+    # best_acc=0. 
+    # best_i_j_k=(0,0)
+    # for i in np.arange(-3,3,0.1):
+    #     for j in np.arange(-3,3,0.1):
+    #         acc=get_acc(scores1*i+scores2*j,correct_answers)
+    #         if best_acc<acc:
+    #             best_acc=acc 
+    #             best_i_j_k=(i,j)
+    # print (best_acc,best_i_j_k)
+    # get_acc(scores1*best_i_j_k[0]+scores2*best_i_j_k[1],correct_answers,'scores1_scores2')
 
-    best_acc=0. 
-    best_i_j_k=(0,0)
-    for i in np.arange(-3,3,0.1):
-        for j in np.arange(-3,3,0.1):
-            acc=get_acc(scores3*i+scores2*j,correct_answers)
-            if best_acc<acc:
-                best_acc=acc 
-                best_i_j_k=(i,j)
-    print (best_acc,best_i_j_k)
-    get_acc(scores3*best_i_j_k[0]+scores2*best_i_j_k[1],correct_answers,'scores2_scores3')
+    # best_acc=0. 
+    # best_i_j_k=(0,0)
+    # for i in np.arange(-3,3,0.1):
+    #     for j in np.arange(-3,3,0.1):
+    #         acc=get_acc(scores3*i+scores2*j,correct_answers)
+    #         if best_acc<acc:
+    #             best_acc=acc 
+    #             best_i_j_k=(i,j)
+    # print (best_acc,best_i_j_k)
+    # get_acc(scores3*best_i_j_k[0]+scores2*best_i_j_k[1],correct_answers,'scores2_scores3')
 
-    best_acc=0. 
-    best_i_j_k=(0,0,0)
-    for i in np.arange(-3,3,0.1):
-        for j in np.arange(-3,3,0.1):
-            for k in np.arange(-3,3,0.1):
-                acc=get_acc(scores1*i+scores3*j+scores2*k,correct_answers)
-                if best_acc<acc:
-                    best_acc=acc 
-                    best_i_j_k=(i,j,k)
-    print (best_acc,best_i_j_k)
-    get_acc(scores1*best_i_j_k[0]+scores3*best_i_j_k[1]+scores2*best_i_j_k[2],correct_answers,'scores1_scores2_scores3')
-    
+    # best_acc=0. 
+    # best_i_j_k=(0,0,0)
+    # for i in np.arange(-3,3,0.1):
+    #     for j in np.arange(-3,3,0.1):
+    #         for k in np.arange(-3,3,0.1):
+    #             acc=get_acc(scores1*i+scores3*j+scores2*k,correct_answers)
+    #             if best_acc<acc:
+    #                 best_acc=acc 
+    #                 best_i_j_k=(i,j,k)
+    # print (best_acc,best_i_j_k)
+    # get_acc(scores1*best_i_j_k[0]+scores3*best_i_j_k[1]+scores2*best_i_j_k[2],correct_answers,'scores1_scores2_scores3')
+
 # SGNN 1
 # event_chain-PairLSTM 2
 # event_comp 3

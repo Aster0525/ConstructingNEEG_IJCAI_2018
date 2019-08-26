@@ -13,7 +13,6 @@ import torch.optim as optim
 import pprint,copy,os,random,math,sys,pickle,time
 import numpy as np
 import networkx as nx
-torch.manual_seed(1)
 use_cuda = torch.cuda.is_available()
 # from whim_common.utils.progress import get_progress_bar
 # use_cuda = False
@@ -28,14 +27,14 @@ def trans_to_cuda(variable):
     else:
         return variable
 
-def id_to_vec(emb_file):
+def id_to_vec(emb_file, pad_idx):
     dic={}
     for s in open(emb_file):
         s=s.strip().split()
         if len(s)==2:
             continue
         dic[s[0]]=np.array(s[1:],dtype=np.float32)
-    dic['0']=np.zeros(len(dic['0']),dtype=np.float32)
+    dic[str(pad_idx)]=np.zeros(len(dic[str(pad_idx)]),dtype=np.float32)
     return dic
 
 def word_to_id(voc_file):
@@ -51,8 +50,8 @@ def get_word_vec(id_vec):
         word_vec.append(id_vec[str(i)])
     return np.array(word_vec,dtype=np.float32)
 
-def get_hash_for_word(emb_file,voc_file):
-    id_vec=id_to_vec(emb_file)
+def get_hash_for_word(emb_file,voc_file, pad_idx=0):
+    id_vec=id_to_vec(emb_file, pad_idx)
     return word_to_id(voc_file),id_vec,get_word_vec(id_vec)
 
 class Data_data(object):
